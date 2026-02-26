@@ -10,15 +10,16 @@ from google.oauth2.service_account import Credentials
 import zipfile
 import gc
 import traceback
-import sys
 
 DOWNLOAD_DIR = "/tmp/shopee_automation"
 
-# === ID DA NOVA PLANILHA DESTINO ===
+# === COLOQUE O ID DA SUA PLANILHA ABAIXO ===
+# Exemplo: SPREADSHEET_ID = "1BxiMVs0XRA5nFMdKvBdBZjgmUWqnzv-al6M6lZJ"
 SPREADSHEET_ID = "1TPjzvE8n-NdY2wwoToWYWduhGSID7ATishyvdM0YNRk" 
-# ===================================
+# ===========================================
 
 def rename_downloaded_file(download_dir, download_path):
+    """Renames the downloaded file to include the current hour."""
     try:
         current_hour = datetime.datetime.now().strftime("%H")
         new_file_name = f"TO-Packed{current_hour}.zip"
@@ -33,7 +34,6 @@ def rename_downloaded_file(download_dir, download_path):
         return None
 
 def unzip_and_process_data(zip_path, extract_to_dir):
-    """Extrai os CSVs do ZIP e retorna o DataFrame bruto (sem filtros)."""
     try:
         unzip_folder = os.path.join(extract_to_dir, "extracted_files")
         os.makedirs(unzip_folder, exist_ok=True)
@@ -49,20 +49,47 @@ def unzip_and_process_data(zip_path, extract_to_dir):
             shutil.rmtree(unzip_folder)
             return None
 
-        print(f"Lendo {len(csv_files)} arquivos CSV(s)...")
+        print(f"Lendo e unificando {len(csv_files)} arquivos CSV...")
         all_dfs = [pd.read_csv(file, encoding='utf-8') for file in csv_files]
         df_final = pd.concat(all_dfs, ignore_index=True)
 
-        print(f"Leitura concluída. A base de dados tem {len(df_final)} linhas e {len(df_final.columns)} colunas no total.")
+        # === INÍCIO DA LÓGICA DE PROCESSAMENTO ===
+        print("Iniciando processamento dos dados...")
         
+        print("Aplicando filtro: SoC_SP_Cravinhos...")
+        if not df_final.empty:
+            df_final = df_final[df_final.iloc[:, 12] == "SoC_SP_Cravinhos"]
+            print(f"Linhas restantes após filtro: {len(df_final)}")
+
+        colunas_desejadas = [0, 9, 15, 17, 2, 23]
+        df_selecionado = df_final.iloc[:, colunas_desejadas].copy()
+        
+        df_selecionado.columns = ['Chave', 'Coluna9', 'Coluna15', 'Coluna17', 'Coluna2', 'Coluna23']
+
+        contagem = df_selecionado['Chave'].value_counts().reset_index()
+        contagem.columns = ['Chave', 'Quantidade']
+
+        agrupado = df_selecionado.groupby('Chave').agg({
+            'Coluna9': 'first',
+            'Coluna15': 'first',
+            'Coluna17': 'first',
+            'Coluna2': 'first',
+            'Coluna23': 'first',
+        }).reset_index()
+
+        resultado = pd.merge(agrupado, contagem, on='Chave')
+        resultado = resultado[['Chave', 'Coluna9', 'Coluna15', 'Coluna17', 'Quantidade', 'Coluna2', 'Coluna23']]
+        
+        print(f"Processamento concluído. DataFrame final tem {len(resultado)} linhas.")
         shutil.rmtree(unzip_folder)
-        return df_final
+        return resultado
         
     except Exception as e:
-        print(f"Erro ao extrair e ler dados: {e}")
+        print(f"Erro ao processar dados: {e}")
         return None
 
 def update_google_sheet_with_dataframe(df_to_upload):
+    """Updates a Google Sheet using native gspread methods and modern auth."""
     if df_to_upload is None or df_to_upload.empty:
         print("Nenhum dado para enviar.")
         return
@@ -70,6 +97,7 @@ def update_google_sheet_with_dataframe(df_to_upload):
     try:
         print(f"Preparando envio de {len(df_to_upload)} linhas para o Google Sheets...")
         
+        # --- AUTENTICAÇÃO MODERNA ---
         scope = [
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/spreadsheets",
@@ -82,16 +110,25 @@ def update_google_sheet_with_dataframe(df_to_upload):
         creds = Credentials.from_service_account_file("hxh.json", scopes=scope)
         client = gspread.authorize(creds)
         
+        # --- MUDANÇA AQUI: Abrir pelo ID é muito mais seguro ---
         print(f"Abrindo planilha pelo ID: {SPREADSHEET_ID}...")
-        planilha = client.open_by_key(SPREADSHEET_ID)
+        try:
+            planilha = client.open_by_key(SPREADSHEET_ID)
+        except gspread.exceptions.APIError as api_err:
+            print("❌ Erro de permissão! Verifique se o email do arquivo 'hxh.json' está compartilhado na planilha.")
+            raise api_err
+
         aba = planilha.worksheet("Packed")
         
+        # 1. Limpar a aba
         print("Limpando a aba 'Packed'...")
         aba.clear() 
         
+        # 2. Enviar Cabeçalho
         headers = df_to_upload.columns.tolist()
         aba.append_rows([headers], value_input_option='USER_ENTERED')
         
+        # 3. Preparar dados
         df_to_upload = df_to_upload.fillna('')
         dados_lista = df_to_upload.values.tolist()
         
@@ -115,40 +152,26 @@ def update_google_sheet_with_dataframe(df_to_upload):
         traceback.print_exc()
 
 async def main():
-    shopee_user = os.environ.get("SHOPEE_USER")
-    shopee_pass = os.environ.get("SHOPEE_PASS")
-
-    if not shopee_user or not shopee_pass:
-        print("❌ ERRO: Variáveis de ambiente SHOPEE_USER ou SHOPEE_PASS não foram encontradas!")
-        sys.exit(1)
-
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     async with async_playwright() as p:
+        # Mantive os parâmetros de segurança e pop-up que funcionaram no código anterior
         browser = await p.chromium.launch(
             headless=False, 
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"]
         )
-        
-        # --- FORÇA O NAVEGADOR A SER BRASILEIRO ---
-        context = await browser.new_context(
-            accept_downloads=True, 
-            viewport={"width": 1920, "height": 1080},
-            locale="pt-BR",
-            timezone_id="America/Sao_Paulo"
-        )
+        context = await browser.new_context(accept_downloads=True, viewport={"width": 1920, "height": 1080})
         page = await context.new_page()
-        
         try:
             # === LOGIN ===
             print("Realizando login...")
             await page.goto("https://spx.shopee.com.br/")
             await page.wait_for_selector('xpath=//*[@placeholder="Ops ID"]', timeout=15000)
-            
-            await page.locator('xpath=//*[@placeholder="Ops ID"]').fill(shopee_user)
-            await page.locator('xpath=//*[@placeholder="Senha"]').fill(shopee_pass)
+            await page.locator('xpath=//*[@placeholder="Ops ID"]').fill('Ops141166')
+            await page.locator('xpath=//*[@placeholder="Senha"]').fill('@Shopee123')
             await page.locator('xpath=/html/body/div[1]/div/div[2]/div/div/div[1]/div[3]/form/div/div/button').click()
             await page.wait_for_timeout(10000)
             
+            # Tentar fechar popup se existir
             try:
                 if await page.locator('.ssc-dialog-close').is_visible():
                     await page.locator('.ssc-dialog-close').click()
@@ -157,53 +180,19 @@ async def main():
             
             # === NAVEGAÇÃO E EXPORTAÇÃO ===
             print("Navegando...")
-            await page.goto("https://spx.shopee.com.br/#/general-to-management", wait_until="domcontentloaded")
+            await page.goto("https://spx.shopee.com.br/#/general-to-management")
+            await page.wait_for_timeout(8000)
             
-            # Aguardamos 4 segundos fixos para dar tempo da Shopee renderizar o pop-up na tela
-            await page.wait_for_timeout(4000)
-            
-            print("Verificando pop-ups na tela de exportação...")
-            
-            # --- TENTATIVA 1: ESCAPE ---
-            print("1️⃣ Tentativa 1: Tecla Escape...")
+            # Tratamento de Pop-up extra antes de exportar
             try:
-                await page.keyboard.press("Escape")
-                await page.wait_for_timeout(1000)
+                if await page.locator('.ssc-dialog-wrapper').is_visible():
+                     await page.keyboard.press("Escape")
+                     await page.wait_for_timeout(1000)
             except:
                 pass
 
-            # --- TENTATIVA 2: LOOP DOS BOTÕES ---
-            print("2️⃣ Tentativa 2: Procurando botões de fechar...")
-            possible_buttons = [
-                ".ssc-dialog-header .ssc-dialog-close-icon-wrapper",
-                ".ssc-dialog-close-icon-wrapper",
-                "svg.ssc-dialog-close",             
-                ".ant-modal-close",               
-                ".ant-modal-close-x",
-                "[aria-label='Close']"
-            ]
-
-            for seletor in possible_buttons:
-                try:
-                    botao = page.locator(seletor).first
-                    if await botao.is_visible():
-                        print(f"-> Botão encontrado ({seletor}). Clicando...")
-                        await botao.click(force=True)
-                        await page.wait_for_timeout(1500)
-                        print("✅ Pop-up fechado com sucesso pelo botão!")
-                        break
-                except Exception as e:
-                    print(f"-> Falha no seletor {seletor}, tentando o próximo...")
-                    continue
-
-            print("Aguardando o botão Exportar ficar livre na tela...")
-            
-            # --- ESPERA INTELIGENTE PELO BOTÃO EXPORTAR ---
-            btn_exportar = page.locator("text='Exportar'").first
-            await btn_exportar.wait_for(state="visible", timeout=30000)
-            print("Botão Exportar liberado! Clicando...")
-            
-            await btn_exportar.click(force=True)
+            print("Exportando...")
+            await page.get_by_role('button', name='Exportar').click(force=True)
             await page.wait_for_timeout(5000)
             await page.locator('xpath=/html[1]/body[1]/span[4]/div[1]/div[1]/div[1]').click(force=True)
             await page.wait_for_timeout(5000)
@@ -224,7 +213,7 @@ async def main():
             await download.save_as(download_path)
             print(f"Download concluído: {download_path}")
 
-            # === PROCESSAMENTO E UPLOAD ===
+            # === PROCESSAMENTO ===
             renamed_zip_path = rename_downloaded_file(DOWNLOAD_DIR, download_path)
             
             if renamed_zip_path:
@@ -236,24 +225,13 @@ async def main():
                     gc.collect()
 
         except Exception as e:
-            print(f"\n❌ Erro durante a execução do Playwright: {e}")
+            print(f"Erro durante a execução do Playwright: {e}")
             traceback.print_exc()
-            
-            # --- TIRA A FOTO EM CASO DE ERRO ---
-            print("Salvando screenshot do erro para análise...")
-            try:
-                await page.screenshot(path="erro_shopee.png", full_page=True)
-                print("Screenshot salvo como 'erro_shopee.png'")
-            except Exception as screenshot_err:
-                print(f"Não foi possível tirar screenshot: {screenshot_err}")
-                
-            sys.exit(1)
-            
         finally:
             await browser.close()
             if os.path.exists(DOWNLOAD_DIR):
                 shutil.rmtree(DOWNLOAD_DIR)
-                print("Limpeza do diretório concluída.")
+                print("Limpeza concluída.")
 
 if __name__ == "__main__":
     asyncio.run(main())
