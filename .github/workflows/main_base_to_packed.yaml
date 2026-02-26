@@ -30,3 +30,15 @@ jobs:
 
       - name: Executar o script
         run: xvfb-run python main_base_to_packed.py
+        env:
+          SHOPEE_USER: ${{ secrets.SHOPEE_USER }}
+          SHOPEE_PASS: ${{ secrets.SHOPEE_PASS }}
+
+      # --- NOVO: SALVA A IMAGEM SE DER ERRO ---
+      - name: Salvar print de erro (se houver)
+        if: always() # Roda mesmo se o passo anterior falhar
+        uses: actions/upload-artifact@v4
+        with:
+          name: erro-shopee-screenshot
+          path: erro_shopee.png
+          retention-days: 5
