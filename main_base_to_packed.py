@@ -175,6 +175,7 @@ async def main():
             try:
                 if await page.locator('.ssc-dialog-close').is_visible():
                     await page.locator('.ssc-dialog-close').click()
+                    await page.wait_for_timeout(5000)
             except:
                 pass
             
