@@ -15,7 +15,7 @@ DOWNLOAD_DIR = "/tmp/shopee_automation"
 
 # === COLOQUE O ID DA SUA PLANILHA ABAIXO ===
 # Exemplo: SPREADSHEET_ID = "1BxiMVs0XRA5nFMdKvBdBZjgmUWqnzv-al6M6lZJ"
-SPREADSHEET_ID = "1hoXYiyuArtbd2pxMECteTFSE75LdgvA2Vlb6gPpGJ-g" 
+SPREADSHEET_ID = "1TPjzvE8n-NdY2wwoToWYWduhGSID7ATishyvdM0YNRk" 
 # ===========================================
 
 def rename_downloaded_file(download_dir, download_path):
@@ -166,7 +166,7 @@ async def main():
             print("Realizando login...")
             await page.goto("https://spx.shopee.com.br/")
             await page.wait_for_selector('xpath=//*[@placeholder="Ops ID"]', timeout=15000)
-            await page.locator('xpath=//*[@placeholder="Ops ID"]').fill('Ops71223')
+            await page.locator('xpath=//*[@placeholder="Ops ID"]').fill('Ops141166')
             await page.locator('xpath=//*[@placeholder="Senha"]').fill('@Shopee123')
             await page.locator('xpath=/html/body/div[1]/div/div[2]/div/div/div[1]/div[3]/form/div/div/button').click()
             await page.wait_for_timeout(10000)
