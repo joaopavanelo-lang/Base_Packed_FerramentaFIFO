@@ -118,10 +118,10 @@ def update_google_sheet_with_dataframe(df_to_upload):
             print("❌ Erro de permissão! Verifique se o email do arquivo 'hxh.json' está compartilhado na planilha.")
             raise api_err
 
-        aba = planilha.worksheet("Packed")
+        aba = planilha.worksheet("Base")
         
         # 1. Limpar a aba
-        print("Limpando a aba 'Packed'...")
+        print("Limpando a aba 'Base'...")
         aba.clear() 
         
         # 2. Enviar Cabeçalho
