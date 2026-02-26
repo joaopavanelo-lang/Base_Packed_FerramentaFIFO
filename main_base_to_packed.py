@@ -158,21 +158,50 @@ async def main():
             # === NAVEGAÇÃO E EXPORTAÇÃO ===
             print("Navegando...")
             await page.goto("https://spx.shopee.com.br/#/general-to-management", wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000)
+            
+            # Aguardamos 4 segundos fixos para dar tempo da Shopee renderizar o pop-up na tela
+            await page.wait_for_timeout(4000)
             
             print("Verificando pop-ups na tela de exportação...")
+            
+            # --- TENTATIVA 1: ESCAPE ---
+            print("1️⃣ Tentativa 1: Tecla Escape...")
             try:
-                if await page.locator('.ssc-dialog-wrapper').is_visible():
-                     await page.keyboard.press("Escape")
-                     await page.wait_for_timeout(1000)
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(1000)
             except:
                 pass
 
-            print("Aguardando o botão Exportar aparecer na tela...")
-            # --- ESPERA INTELIGENTE E MAIS FLEXÍVEL ---
+            # --- TENTATIVA 2: LOOP DOS BOTÕES ---
+            print("2️⃣ Tentativa 2: Procurando botões de fechar...")
+            possible_buttons = [
+                ".ssc-dialog-header .ssc-dialog-close-icon-wrapper",
+                ".ssc-dialog-close-icon-wrapper",
+                "svg.ssc-dialog-close",             
+                ".ant-modal-close",               
+                ".ant-modal-close-x",
+                "[aria-label='Close']"
+            ]
+
+            for seletor in possible_buttons:
+                try:
+                    botao = page.locator(seletor).first
+                    if await botao.is_visible():
+                        print(f"-> Botão encontrado ({seletor}). Clicando...")
+                        await botao.click(force=True)
+                        await page.wait_for_timeout(1500)
+                        print("✅ Pop-up fechado com sucesso pelo botão!")
+                        break
+                except Exception as e:
+                    print(f"-> Falha no seletor {seletor}, tentando o próximo...")
+                    continue
+
+            print("Aguardando o botão Exportar ficar livre na tela...")
+            
+            # --- ESPERA INTELIGENTE PELO BOTÃO EXPORTAR ---
             btn_exportar = page.locator("text='Exportar'").first
             await btn_exportar.wait_for(state="visible", timeout=30000)
-            print("Botão encontrado! Clicando em Exportar...")
+            print("Botão Exportar liberado! Clicando...")
             
             await btn_exportar.click(force=True)
             await page.wait_for_timeout(5000)
@@ -218,7 +247,6 @@ async def main():
             except Exception as screenshot_err:
                 print(f"Não foi possível tirar screenshot: {screenshot_err}")
                 
-            # Interrompe o script informando o erro ao GitHub Actions
             sys.exit(1)
             
         finally:
