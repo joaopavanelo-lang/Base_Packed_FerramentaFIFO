@@ -14,7 +14,6 @@ import traceback
 DOWNLOAD_DIR = "/tmp/shopee_automation"
 
 # === COLOQUE O ID DA SUA PLANILHA ABAIXO ===
-# Exemplo: SPREADSHEET_ID = "1BxiMVs0XRA5nFMdKvBdBZjgmUWqnzv-al6M6lZJ"
 SPREADSHEET_ID = "1TPjzvE8n-NdY2wwoToWYWduhGSID7ATishyvdM0YNRk" 
 # ===========================================
 
@@ -53,8 +52,18 @@ def unzip_and_process_data(zip_path, extract_to_dir):
         all_dfs = [pd.read_csv(file, encoding='utf-8') for file in csv_files]
         df_final = pd.concat(all_dfs, ignore_index=True)
 
-        # Retorna os dados originais sem nenhum filtro ou agrupamento
-        print(f"Processamento concluído. O arquivo possui {len(df_final)} linhas e {len(df_final.columns)} colunas originais.")
+        # === UNIFICAÇÃO PELA COLUNA A ===
+        total_linhas_antes = len(df_final)
+        print(f"Linhas antes de unificar: {total_linhas_antes}")
+        
+        # Pega o nome exato da primeira coluna (Coluna A / Índice 0)
+        nome_coluna_a = df_final.columns[0]
+        
+        # Remove as duplicatas mantendo apenas a primeira ocorrência de cada chave
+        df_final = df_final.drop_duplicates(subset=[nome_coluna_a], keep='first')
+        
+        total_linhas_depois = len(df_final)
+        print(f"Processamento concluído. Linhas após unificar pela Coluna A: {total_linhas_depois} (Foram removidas {total_linhas_antes - total_linhas_depois} duplicatas).")
         
         shutil.rmtree(unzip_folder)
         return df_final
@@ -72,7 +81,6 @@ def update_google_sheet_with_dataframe(df_to_upload):
     try:
         print(f"Preparando envio de {len(df_to_upload)} linhas para o Google Sheets...")
         
-        # --- AUTENTICAÇÃO MODERNA ---
         scope = [
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/spreadsheets",
@@ -85,41 +93,32 @@ def update_google_sheet_with_dataframe(df_to_upload):
         creds = Credentials.from_service_account_file("hxh.json", scopes=scope)
         client = gspread.authorize(creds)
         
-        # --- MUDANÇA AQUI: Abrir pelo ID é muito mais seguro ---
         print(f"Abrindo planilha pelo ID: {SPREADSHEET_ID}...")
-        try:
-            planilha = client.open_by_key(SPREADSHEET_ID)
-        except gspread.exceptions.APIError as api_err:
-            print("❌ Erro de permissão! Verifique se o email do arquivo 'hxh.json' está compartilhado na planilha.")
-            raise api_err
-
+        planilha = client.open_by_key(SPREADSHEET_ID)
         aba = planilha.worksheet("Base")
         
-        # 1. Limpar a aba
         print("Limpando a aba 'Base'...")
         aba.clear() 
         
-        # 2. Enviar Cabeçalho
         headers = df_to_upload.columns.tolist()
         aba.append_rows([headers], value_input_option='USER_ENTERED')
         
-        # 3. Preparar dados
         df_to_upload = df_to_upload.fillna('')
         dados_lista = df_to_upload.values.tolist()
         
-        chunk_size = 2000
+        # Mantive os lotes em 15.000 para ser rápido
+        chunk_size = 15000 
         total_chunks = (len(dados_lista) // chunk_size) + 1
         
-        print(f"Iniciando upload de {len(dados_lista)} registros em {total_chunks} lotes...")
+        print(f"Iniciando upload otimizado de {len(dados_lista)} registros em {total_chunks} lotes...")
 
         for i in range(0, len(dados_lista), chunk_size):
             chunk = dados_lista[i:i + chunk_size]
             aba.append_rows(chunk, value_input_option='USER_ENTERED')
             print(f" -> Lote {i//chunk_size + 1}/{total_chunks} enviado.")
-            time.sleep(2) 
+            time.sleep(1)
         
         print("✅ SUCESSO! Dados enviados para o Google Sheets.")
-        time.sleep(2)
 
     except Exception as e:
         print("❌ ERRO CRÍTICO NO UPLOAD:")
@@ -129,7 +128,6 @@ def update_google_sheet_with_dataframe(df_to_upload):
 async def main():
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     async with async_playwright() as p:
-        # Mantive os parâmetros de segurança e pop-up que funcionaram no código anterior
         browser = await p.chromium.launch(
             headless=False, 
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"]
@@ -137,7 +135,6 @@ async def main():
         context = await browser.new_context(accept_downloads=True, viewport={"width": 1920, "height": 1080})
         page = await context.new_page()
         try:
-            # === LOGIN ===
             print("Realizando login...")
             await page.goto("https://spx.shopee.com.br/")
             await page.wait_for_selector('xpath=//*[@placeholder="Ops ID"]', timeout=15000)
@@ -146,19 +143,16 @@ async def main():
             await page.locator('xpath=/html/body/div[1]/div/div[2]/div/div/div[1]/div[3]/form/div/div/button').click()
             await page.wait_for_timeout(10000)
             
-            # Tentar fechar popup se existir
             try:
                 if await page.locator('.ssc-dialog-close').is_visible():
                     await page.locator('.ssc-dialog-close').click()
             except:
                 pass
             
-            # === NAVEGAÇÃO E EXPORTAÇÃO ===
             print("Navegando...")
             await page.goto("https://spx.shopee.com.br/#/general-to-management")
             await page.wait_for_timeout(8000)
             
-            # Tratamento de Pop-up extra antes de exportar
             try:
                 if await page.locator('.ssc-dialog-wrapper').is_visible():
                      await page.keyboard.press("Escape")
@@ -178,7 +172,6 @@ async def main():
             print("Aguardando geração do relatório...")
             await page.wait_for_timeout(60000) 
             
-            # === DOWNLOAD ===
             print("Baixando...")
             async with page.expect_download(timeout=120000) as download_info:
                 await page.get_by_role("button", name="Baixar").first.click(force=True)
@@ -188,11 +181,9 @@ async def main():
             await download.save_as(download_path)
             print(f"Download concluído: {download_path}")
 
-            # === PROCESSAMENTO ===
             renamed_zip_path = rename_downloaded_file(DOWNLOAD_DIR, download_path)
             
             if renamed_zip_path:
-                # O DataFrame retornado agora é o arquivo original
                 final_dataframe = unzip_and_process_data(renamed_zip_path, DOWNLOAD_DIR)
                 update_google_sheet_with_dataframe(final_dataframe)
                 
