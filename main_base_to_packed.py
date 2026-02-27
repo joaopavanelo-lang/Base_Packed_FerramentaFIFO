@@ -53,36 +53,11 @@ def unzip_and_process_data(zip_path, extract_to_dir):
         all_dfs = [pd.read_csv(file, encoding='utf-8') for file in csv_files]
         df_final = pd.concat(all_dfs, ignore_index=True)
 
-        # === INÍCIO DA LÓGICA DE PROCESSAMENTO ===
-        print("Iniciando processamento dos dados...")
+        # Retorna os dados originais sem nenhum filtro ou agrupamento
+        print(f"Processamento concluído. O arquivo possui {len(df_final)} linhas e {len(df_final.columns)} colunas originais.")
         
-        print("Aplicando filtro: SoC_SP_Cravinhos...")
-        if not df_final.empty:
-            df_final = df_final[df_final.iloc[:, 12] == "SoC_SP_Cravinhos"]
-            print(f"Linhas restantes após filtro: {len(df_final)}")
-
-        colunas_desejadas = [0, 9, 15, 17, 2, 23]
-        df_selecionado = df_final.iloc[:, colunas_desejadas].copy()
-        
-        df_selecionado.columns = ['Chave', 'Coluna9', 'Coluna15', 'Coluna17', 'Coluna2', 'Coluna23']
-
-        contagem = df_selecionado['Chave'].value_counts().reset_index()
-        contagem.columns = ['Chave', 'Quantidade']
-
-        agrupado = df_selecionado.groupby('Chave').agg({
-            'Coluna9': 'first',
-            'Coluna15': 'first',
-            'Coluna17': 'first',
-            'Coluna2': 'first',
-            'Coluna23': 'first',
-        }).reset_index()
-
-        resultado = pd.merge(agrupado, contagem, on='Chave')
-        resultado = resultado[['Chave', 'Coluna9', 'Coluna15', 'Coluna17', 'Quantidade', 'Coluna2', 'Coluna23']]
-        
-        print(f"Processamento concluído. DataFrame final tem {len(resultado)} linhas.")
         shutil.rmtree(unzip_folder)
-        return resultado
+        return df_final
         
     except Exception as e:
         print(f"Erro ao processar dados: {e}")
@@ -217,6 +192,7 @@ async def main():
             renamed_zip_path = rename_downloaded_file(DOWNLOAD_DIR, download_path)
             
             if renamed_zip_path:
+                # O DataFrame retornado agora é o arquivo original
                 final_dataframe = unzip_and_process_data(renamed_zip_path, DOWNLOAD_DIR)
                 update_google_sheet_with_dataframe(final_dataframe)
                 
